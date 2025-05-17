@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Global font as fallback */
+body {
+  font-family: 'Inter', sans-serif;
+} 
+html {
+  scroll-behavior: smooth;
+}
+
+
+@font-face {
+  font-family: 'Cal Sans';
+  src: url('/my-app/Public/fonts/CalSans-Regular.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
