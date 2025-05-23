@@ -8,7 +8,7 @@ const poppins = Poppins({
   subsets: ['latin'],
 })
 
-export const metadata: Metadata = {
+ const metadata: Metadata = {
   title: 'Thoughts — Pure Ideas, Shared Simply',
   description: 'A space to share and follow pure thoughts. No media. No replies. Just ideas.',
 }
