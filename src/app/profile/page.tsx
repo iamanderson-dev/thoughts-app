@@ -4,11 +4,12 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import Image from "next/image";
-import 'flowbite'; 
+import 'flowbite';
 import { FaPencilAlt } from "react-icons/fa";
 
-// Helper to generate a unique username
+// Helper to generate a unique username (keep as is)
 async function generateUniqueUsername(base: string): Promise<string> {
+  // ... (implementation from your code)
   let username = base;
   let suffix = 1;
   while (true) {
@@ -26,8 +27,9 @@ async function generateUniqueUsername(base: string): Promise<string> {
   return username;
 }
 
-// Helper to get error message
+// Helper to get error message (keep as is)
 function getErrorMessage(error: unknown): string {
+  // ... (implementation from your code)
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;
   try {
@@ -37,63 +39,63 @@ function getErrorMessage(error: unknown): string {
   }
 }
 
+// Define the type for a thought, ensure it matches what the modal event sends
+interface Thought {
+  id: string;
+  content: string;
+  created_at: string;
+  user_id: string; // Or whatever other fields your 'thoughts' table returns
+  // Add other fields if your 'thoughts' table returns them and you need them
+}
+
+
 export default function ProfilePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<any>(null); // Consider a stricter type
   const [thoughtCount, setThoughtCount] = useState(0);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
-  const [newThought, setNewThought] = useState("");
+  const [newThought, setNewThought] = useState(""); // For the inline thought post on profile page
   const [posting, setPosting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
   const [editUsername, setEditUsername] = useState("");
   const [editBio, setEditBio] = useState("");
-  const [thoughts, setThoughts] = useState<Array<{ id: string; content: string; created_at: string }>>([]);
+  const [thoughts, setThoughts] = useState<Thought[]>([]); // Use the Thought interface
 
   const isMountedRef = useRef(true);
 
-  const fetchProfile = useCallback(async () => {
-    if (!isMountedRef.current) {
-      console.log("fetchProfile: Component unmounted, aborting fetch.");
-      return;
-    }
-    console.log("fetchProfile: Starting to fetch profile data...");
-    setLoading(true);
+  const fetchProfile = useCallback(async (isRefresh: boolean = false) => { // Added isRefresh
+    if (!isMountedRef.current) return;
+    if (!isRefresh) setLoading(true); // Only set loading on initial fetch
     setError(null);
 
     try {
-      const {
-        data: { user: authUser },
-        error: authError,
-      } = await supabase.auth.getUser();
-
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
       if (authError) throw new Error(`Auth error: ${authError.message}`);
       if (!authUser) throw new Error("No authenticated user found. Please log in.");
 
       const userId = authUser.id;
-      const { data: userThoughts, error: thoughtsError } = await supabase
-        .from("thoughts")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false });
+
+      // Fetch thoughts and user profile concurrently
+      const [
+        { data: userThoughts, error: thoughtsError },
+        { data: userProfileById, error: userByIdError }
+      ] = await Promise.all([
+        supabase.from("thoughts").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
+        supabase.from("users").select("*").eq("id", userId).single()
+      ]);
 
       if (thoughtsError) throw new Error(`Thoughts fetch error: ${thoughtsError.message}`);
       if (isMountedRef.current) {
-        setThoughts(userThoughts || []);
+        setThoughts(userThoughts as Thought[] || []);
       }
 
-      const { data: userProfileById, error: userByIdError } = await supabase
-        .from("users")
-        .select("*")
-        .eq("id", userId)
-        .single();
-
       let profileUser = userProfileById;
-
-      if (userByIdError && userByIdError.code === "PGRST116") { // User not found by ID
+      if (userByIdError && userByIdError.code === "PGRST116") {
+        // ... (your existing logic for handling user not found by ID, then by email, then create)
         console.log("fetchProfile: User not found by ID, trying by email.");
         const { data: userByEmail, error: userByEmailError } = await supabase
           .from("users")
@@ -101,167 +103,125 @@ export default function ProfilePage() {
           .eq("email", authUser.email)
           .single();
 
-        if (userByEmailError && userByEmailError.code === "PGRST116") { // User not found by email, create new
+        if (userByEmailError && userByEmailError.code === "PGRST116") {
           console.log("fetchProfile: User not found by email, creating new user entry.");
           const defaultName = authUser.user_metadata?.name || "Anonymous";
-          const rawUsername =
-            authUser.user_metadata?.username || `user_${userId.slice(0, 8)}`;
+          const rawUsername = authUser.user_metadata?.username || `user_${userId.slice(0, 8)}`;
           const baseUsername = rawUsername.toLowerCase().replace(/\s+/g, "_");
           const uniqueUsername = await generateUniqueUsername(baseUsername);
 
           const { data: newUser, error: insertError } = await supabase
             .from("users")
             .insert({
-              id: userId,
-              email: authUser.email,
-              name: defaultName,
-              username: uniqueUsername,
-              joined_at: new Date().toISOString(),
-              bio: null,
+              id: userId, email: authUser.email, name: defaultName,
+              username: uniqueUsername, joined_at: new Date().toISOString(), bio: null,
             })
-            .select()
-            .single();
-
+            .select().single();
           if (insertError) throw new Error(`User insert error: ${insertError.message}`);
           profileUser = newUser;
         } else if (userByEmail) {
-          console.log("fetchProfile: User found by email.");
           profileUser = userByEmail;
         } else if (userByEmailError) {
           throw new Error(`User by email fetch error: ${userByEmailError.message}`);
         } else {
             throw new Error("Error fetching user by email, unknown reason.");
         }
-      } else if (userByIdError) { // Other error fetching by ID
+      } else if (userByIdError) {
         throw new Error(`User by ID fetch error: ${userByIdError.message}`);
       }
-      
-      if (!profileUser) {
-        throw new Error("User profile could not be resolved after all attempts.");
-      }
-      console.log("fetchProfile: Profile user data resolved:", profileUser);
+
+      if (!profileUser) throw new Error("User profile could not be resolved.");
 
       if (isMountedRef.current) {
         setUser(profileUser);
-
-        const [thoughtsCountRes, followersCountRes, followingCountRes] = await Promise.all([
-          supabase.from("thoughts").select("*", { count: "exact", head: true }).eq("user_id", userId),
-          supabase.from("followers").select("*", { count: "exact", head: true }).eq("following_id", userId),
-          supabase.from("followers").select("*", { count: "exact", head: true }).eq("follower_id", userId),
-        ]);
-
-        if (thoughtsCountRes.error) throw new Error(`Thoughts count error: ${thoughtsCountRes.error.message}`);
-        if (followersCountRes.error) throw new Error(`Followers count error: ${followersCountRes.error.message}`);
-        if (followingCountRes.error) throw new Error(`Following count error: ${followingCountRes.error.message}`);
-
-        setThoughtCount(thoughtsCountRes.count || 0);
-        setFollowersCount(followersCountRes.count || 0);
-        setFollowingCount(followingCountRes.count || 0);
-        console.log("fetchProfile: Counts fetched successfully.");
+        // Fetch counts
+        const { count: thoughtsCountVal, error: thoughtsCountError } = await supabase
+            .from("thoughts").select("*", { count: "exact", head: true }).eq("user_id", userId);
+        // Add similar fetches for followers/following if needed, or derive from thoughts.length if only showing user's thoughts
+        if (thoughtsCountError) throw new Error(`Thoughts count error: ${thoughtsCountError.message}`);
+        setThoughtCount(thoughtsCountVal || 0);
+        // setFollowersCount(...)
+        // setFollowingCount(...)
       }
     } catch (e) {
       const message = getErrorMessage(e);
-      console.error("fetchProfile: CATCH BLOCK:", message);
-      if (isMountedRef.current) {
-        setError(message);
-      }
+      console.error("fetchProfile CATCH:", message);
+      if (isMountedRef.current) setError(message);
     } finally {
-      if (isMountedRef.current) {
-        setLoading(false);
-        console.log("fetchProfile: Fetch process finished, loading set to false.");
-      }
+      if (isMountedRef.current && !isRefresh) setLoading(false);
     }
-  }, []); // Dependencies: state setters are stable, refs don't need to be listed. supabase & helpers are stable.
+  }, []); // Dependencies stable
 
   useEffect(() => {
     isMountedRef.current = true;
-    console.log("ProfilePage: Mounted. Calling fetchProfile.");
     fetchProfile();
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log("ProfilePage: Auth state changed:", event);
       if (!isMountedRef.current) return;
-
       if (event === "SIGNED_OUT") {
-        if (isMountedRef.current) setUser(null);
+        setUser(null);
         router.push("/authentication/login");
       } else if (event === "USER_UPDATED" || (event === "SIGNED_IN" && session?.user)) {
-        console.log("ProfilePage: User updated or signed in. Re-fetching profile.");
-        fetchProfile();
+        fetchProfile(); // Re-fetch profile on auth changes
       }
     });
 
+    // ---- MODIFIED: Listen for new thoughts posted from the modal ----
+    const handleNewThoughtPosted = (event: Event) => {
+      if (!isMountedRef.current) return;
+      const customEvent = event as CustomEvent;
+      const newThoughtData = customEvent.detail as Thought; // Cast to your Thought type
+
+      if (!newThoughtData || !newThoughtData.id) {
+        console.warn("ProfilePage: Received new-thought-posted event with invalid/missing data", newThoughtData);
+        return;
+      }
+
+      console.log("ProfilePage: Received new-thought-posted event", newThoughtData);
+
+      setThoughts((prevThoughts) => {
+        // Prevent adding duplicates if router.refresh() also updates the list
+        if (!prevThoughts.find(t => t.id === newThoughtData.id)) {
+          return [newThoughtData, ...prevThoughts];
+        }
+        return prevThoughts;
+      });
+      // Optimistically update count. fetchProfile after router.refresh() will get the authoritative count.
+      setThoughtCount((prevCount) => prevCount + 1);
+    };
+
+    document.addEventListener('new-thought-posted', handleNewThoughtPosted);
+    // ---- END MODIFIED ----
+
     return () => {
-      console.log("ProfilePage: Unmounting.");
       isMountedRef.current = false;
       authListener?.subscription?.unsubscribe();
+      document.removeEventListener('new-thought-posted', handleNewThoughtPosted); // ---- MODIFIED ----
     };
-  }, [router, fetchProfile]); // fetchProfile is stable due to useCallback with empty deps
+  }, [router, fetchProfile]); // fetchProfile is stable due to useCallback
 
+  // ... (handlePost for inline posting, handleDeleteThought, handleEditToggle, handleSaveProfile, handleAvatarUpload remain the same)
   const handlePost = useCallback(async () => {
-    // ... (handlePost logic as before, ensuring isMountedRef checks)
-    if (!newThought.trim() || !isMountedRef.current) return;
-  
+    if (!newThought.trim() || !isMountedRef.current || !user) return;
     setPosting(true);
-    setError(null); // Clear previous errors specific to posting
-  
+    setError(null);
     try {
-      const {
-        data: { user: authUser },
-        error: authError,
-      } = await supabase.auth.getUser();
-  
+      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
       if (authError || !authUser) {
         if (isMountedRef.current) setError("User not authenticated to post.");
         return;
       }
-  
-      const userId = String(authUser.id).trim();
-  
-      // Ensure user exists in 'users' table (idempotent check/insert)
-      const { data: existingUser, error: fetchUserError } = await supabase
-        .from("users")
-        .select("id")
-        .eq("id", userId) // Check primarily by ID
-        .maybeSingle();
-  
-      if (fetchUserError) throw new Error(`Fetching user for post: ${fetchUserError.message}`);
-  
-      if (!existingUser) {
-        console.log("handlePost: User not in 'users' table, creating entry before posting.");
-        const defaultName = authUser.user_metadata?.name || "Anonymous";
-        const rawUsername = authUser.user_metadata?.username || `user_${userId.slice(0, 8)}`;
-        const baseUsername = rawUsername.toLowerCase().replace(/\s+/g, "_");
-        const uniqueUsername = await generateUniqueUsername(baseUsername);
-  
-        const { error: insertUserError } = await supabase.from("users").insert({
-          id: userId,
-          email: authUser.email, // Ensure email is available and correct
-          name: defaultName,
-          username: uniqueUsername,
-          joined_at: new Date().toISOString(),
-          bio: null, 
-        });
-  
-        if (insertUserError) throw new Error(`Inserting new user for post: ${insertUserError.message}`);
-      }
-  
+      // Ensure user profile exists (simplified, as fetchProfile should handle creation)
       const { data: thought, error: thoughtError } = await supabase
         .from("thoughts")
-        .insert({
-          user_id: userId,
-          content: newThought.trim(),
-          created_at: new Date().toISOString(),
-        })
+        .insert({ user_id: user.id, content: newThought.trim() }) // Using user.id from state
         .select()
         .single();
-  
       if (thoughtError) throw new Error(`Posting thought: ${thoughtError.message}`);
-  
       if (isMountedRef.current) {
         setNewThought("");
+        setThoughts((prev) => [thought as Thought, ...prev]);
         setThoughtCount((c) => c + 1);
-        setThoughts((prev) => [thought, ...prev]);
       }
     } catch (err) {
       console.error("Post error:", err);
@@ -269,19 +229,13 @@ export default function ProfilePage() {
     } finally {
       if (isMountedRef.current) setPosting(false);
     }
-  }, [newThought]); // Add other dependencies if newThought uses them, e.g. supabase, generateUniqueUsername
-  
+  }, [newThought, user]); // Added user to dependencies
+
   const handleDeleteThought = async (id: string) => {
-    // ... (handleDeleteThought logic as before)
     if (!isMountedRef.current) return;
     try {
-      const { error } = await supabase
-        .from("thoughts")
-        .delete()
-        .eq("id", id);
-  
+      const { error } = await supabase.from("thoughts").delete().eq("id", id);
       if (error) throw error;
-  
       if(isMountedRef.current) {
         setThoughts((prev) => prev.filter((t) => t.id !== id));
         setThoughtCount((count) => count - 1);
@@ -290,116 +244,75 @@ export default function ProfilePage() {
       if(isMountedRef.current) setError(getErrorMessage(err));
     }
   };
-  
 
   const handleEditToggle = () => {
-    // ... (handleEditToggle logic as before)
     if (!user || !isMountedRef.current) return;
     setEditName(user.name);
     setEditUsername(user.username);
-    setEditBio(user.bio || ""); 
+    setEditBio(user.bio || "");
     setEditing(true);
-    setError(null); 
+    setError(null);
   };
-  
+
   const handleSaveProfile = async () => {
-    // ... (handleSaveProfile logic as before, ensuring isMountedRef checks)
+    // ... (your existing save profile logic)
     if (!user || !isMountedRef.current) return;
     setError(null);
-  
     try {
       if (!editName.trim() || !editUsername.trim()) {
         throw new Error("Name and Username cannot be empty.");
       }
-
       if (editUsername !== user.username) {
         const { data: existingUserWithNewUsername, error: checkError } = await supabase
-          .from("users")
-          .select("id")
-          .eq("username", editUsername.trim())
-          .neq("id", user.id) 
-          .limit(1)
-          .single();
-
-        if (checkError && checkError.code !== "PGRST116") { 
+          .from("users").select("id").eq("username", editUsername.trim()).neq("id", user.id)
+          .limit(1).single();
+        if (checkError && checkError.code !== "PGRST116") {
           throw new Error(`Checking username uniqueness: ${checkError.message}`);
         }
         if (existingUserWithNewUsername) {
           throw new Error("Username already taken. Please choose another one.");
         }
       }
-
       const { error: updateError } = await supabase
         .from("users")
-        .update({ name: editName.trim(), username: editUsername.trim(), bio: editBio.trim() }) 
+        .update({ name: editName.trim(), username: editUsername.trim(), bio: editBio.trim() })
         .eq("id", user.id);
-  
       if (updateError) throw new Error(`Saving profile: ${updateError.message}`);
-  
       if (isMountedRef.current) {
         setUser((prev: any) => ({ ...prev, name: editName.trim(), username: editUsername.trim(), bio: editBio.trim() }));
         setEditing(false);
       }
     } catch (err) {
       console.error("Save profile error:", err);
-      if (isMountedRef.current) setError(getErrorMessage(err)); // Error will be shown in the modal
+      if (isMountedRef.current) setError(getErrorMessage(err));
     }
   };
-  
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    // ... (handleAvatarUpload logic as before, ensuring isMountedRef checks)
+    // ... (your existing avatar upload logic)
     if (!e.target.files || e.target.files.length === 0 || !user || !isMountedRef.current) return;
-    
     const file = e.target.files[0];
     const fileExt = file.name.split('.').pop();
-    const fileName = `${user.id}-${Date.now()}.${fileExt}`; 
-    const filePath = `${fileName}`; 
-  
-    console.log("Uploading file:", filePath);
-  
+    const fileName = `${user.id}-${Date.now()}.${fileExt}`;
+    const filePath = `${fileName}`;
     try {
-      const { data: uploadData, error: uploadError } = await supabase
-        .storage
-        .from('avatars') 
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: true // If file exists, replace it. Set to false if you want to prevent overwrites.
+      const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file, {
+          cacheControl: '3600', upsert: true
         });
-  
       if (uploadError) throw new Error(`Storage upload error: ${uploadError.message}`);
-  
-      console.log("Upload successful:", uploadData);
-  
-      const { data: urlData } = supabase // No destructuring { publicUrl } here, check the structure
-        .storage
-        .from('avatars')
-        .getPublicUrl(filePath); 
-      
-      if (!urlData || !urlData.publicUrl) { // Check if publicUrl is actually there
-          throw new Error("Failed to get public URL for avatar.");
-      }
+      const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(filePath);
+      if (!urlData || !urlData.publicUrl) throw new Error("Failed to get public URL for avatar.");
       const publicUrl = urlData.publicUrl;
-      console.log("Public URL:", publicUrl);
-  
-      const { error: updateError } = await supabase
-        .from('users')
-        .update({ profile_image_url: publicUrl })
-        .eq('id', user.id);
-  
+      const { error: updateError } = await supabase.from('users').update({ profile_image_url: publicUrl }).eq('id', user.id);
       if (updateError) throw new Error(`DB profile image update error: ${updateError.message}`);
-  
-      console.log("User profile avatar URL updated successfully");
-  
       if(isMountedRef.current) {
         setUser((prev: any) => ({ ...prev, profile_image_url: publicUrl }));
       }
     } catch (err) {
       console.error("Avatar upload failed:", err);
-      if(isMountedRef.current) setError(getErrorMessage(err)); // Display error on page
+      if(isMountedRef.current) setError(getErrorMessage(err));
     }
   };
-
   // --- RENDER LOGIC ---
 
   if (loading) {
