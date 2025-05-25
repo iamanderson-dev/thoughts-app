@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import Image from "next/image";
 import 'flowbite';
+import { FaPencilAlt } from "react-icons/fa";
 
 
 // Helper to generate a unique username
@@ -293,6 +294,68 @@ setThoughts(userThoughts || []);
     }
   };
   
+
+  // Add this function inside your component (but outside useEffect)
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    
+    const file = e.target.files[0];
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${user.id}-${Math.random().toString(36).substring(2, 15)}.${fileExt}`;
+    const filePath = `${fileName}`; // ✅ Removed "avatars/" prefix
+  
+    console.log("Uploading file:", filePath); // Debug log
+  
+    try {
+      // 1. Upload to Storage
+      const { data: uploadData, error: uploadError } = await supabase
+        .storage
+        .from('avatars') // ✅ Bucket is already "avatars"
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true
+        });
+  
+      if (uploadError) {
+        console.error("Upload error:", uploadError);
+        throw uploadError;
+      }
+  
+      console.log("Upload successful:", uploadData);
+  
+      // 2. Get Public URL
+      const { data: { publicUrl } } = await supabase
+        .storage
+        .from('avatars')
+        .getPublicUrl(filePath); // ✅ Now matches corrected path
+  
+      console.log("Public URL:", publicUrl);
+  
+      // 3. Update User Profile
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ profile_image_url: publicUrl })
+        .eq('id', user.id);
+  
+      if (updateError) {
+        console.error("DB update error:", updateError);
+        throw updateError;
+      }
+  
+      console.log("User profile updated successfully");
+  
+      // 4. Update Local State
+      // 4. Update Local State
+setUser((prev: any) => ({ ...prev, profile_image_url: publicUrl }));
+  
+    } catch (err) {
+      console.error("Avatar upload failed:", err);
+      setError(getErrorMessage(err));
+    }
+  };
+  
+
+  
   
   
   
@@ -331,27 +394,43 @@ setThoughts(userThoughts || []);
     <div className="max-w-2xl mx-auto px-4 py-8">
       {/* Profile Header */}
       <div className="flex flex-col items-center mb-8">
-        <div className="w-24 h-24 rounded-full bg-gray-200 mb-4 overflow-hidden">
-          {user.avatar_url ? (
-            <Image
-              src={user.avatar_url}
-              alt="Profile"
-              width={96}
-              height={96}
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-gray-500">
-              <svg className="w-12 h-12" fill="currentColor" viewBox="0 0 20 20">
-                <path
-                  fillRule="evenodd"
-                  d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            </div>
-          )}
-        </div>
+      <div className="relative group">
+      <div className="w-24 h-24 rounded-full bg-gray-200 mb-4 overflow-hidden">
+  {user.profile_image_url ? ( // <--- CHANGED
+   <Image
+     src={`${user.profile_image_url}?${Date.now()}`} // <--- CHANGED
+     alt="Profile"
+     unoptimized={true}
+     width={96}
+     height={96}
+     quality={90}
+     className="w-24 h-24 avatar-image object-cover rounded-full"
+     priority
+   />
+  ) : (
+    <div className="w-full h-full flex items-center justify-center text-gray-500">
+      <svg className="w-12 h-12" fill="currentColor" viewBox="0 0 20 20">
+        <path
+          fillRule="evenodd"
+          d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"
+          clipRule="evenodd"
+        />
+      </svg>
+    </div>
+  )}
+</div>
+  <label className="absolute top-0 left-0 w-full h-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+    <input 
+      type="file" 
+      accept="image/*" 
+      onChange={handleAvatarUpload}
+      className="hidden" 
+    />
+    <div className="bg-black bg-opacity-50 rounded-full p-2">
+      <FaPencilAlt className="text-white" />
+    </div>
+  </label>
+</div>
   
         {/* User Info */}
         <div className="text-center">

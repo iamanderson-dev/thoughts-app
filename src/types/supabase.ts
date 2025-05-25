@@ -16,7 +16,7 @@ export type Database = {
           id: string
           user_id: string
           content: string
-          image_url: string
+          profile_image_url: string
           created_at: string
           // other columns if any
         }
