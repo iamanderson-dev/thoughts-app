@@ -1,570 +1,89 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
-import Image from "next/image";
-import 'flowbite';
-import { FaPencilAlt } from "react-icons/fa";
 
-// Helper to generate a unique username (keep as is)
-async function generateUniqueUsername(base: string): Promise<string> {
-  // ... (implementation from your code)
-  let username = base;
-  let suffix = 1;
-  while (true) {
-    const { data, error } = await supabase
-      .from("users")
-      .select("id")
-      .eq("username", username)
-      .limit(1)
-      .single();
-    if (error && error.code !== "PGRST116") throw new Error(error.message);
-    if (!data) break;
-    username = `${base}${suffix}`;
-    suffix++;
-  }
-  return username;
-}
-
-// Helper to get error message (keep as is)
-function getErrorMessage(error: unknown): string {
-  // ... (implementation from your code)
-  if (error instanceof Error) return error.message;
-  if (typeof error === "string") return error;
-  try {
-    return JSON.stringify(error, null, 2);
-  } catch {
-    return "An unknown error occurred";
-  }
-}
-
-// Define the type for a thought, ensure it matches what the modal event sends
-interface Thought {
-  id: string;
-  content: string;
-  created_at: string;
-  user_id: string; // Or whatever other fields your 'thoughts' table returns
-  // Add other fields if your 'thoughts' table returns them and you need them
-}
-
-
-export default function ProfilePage() {
+export default function MyProfileRedirectPage() {
   const router = useRouter();
-  const [loading, setLoading] = useState(true);
+  // Keep a generic loading state, or even no text if you prefer a purely visual loader
+  const [status, setStatus] = useState("Loading..."); 
   const [error, setError] = useState<string | null>(null);
-  const [user, setUser] = useState<any>(null); // Consider a stricter type
-  const [thoughtCount, setThoughtCount] = useState(0);
-  const [followersCount, setFollowersCount] = useState(0);
-  const [followingCount, setFollowingCount] = useState(0);
-  const [newThought, setNewThought] = useState(""); // For the inline thought post on profile page
-  const [posting, setPosting] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [editName, setEditName] = useState("");
-  const [editUsername, setEditUsername] = useState("");
-  const [editBio, setEditBio] = useState("");
-  const [thoughts, setThoughts] = useState<Thought[]>([]); // Use the Thought interface
-
-  const isMountedRef = useRef(true);
-
-  const fetchProfile = useCallback(async (isRefresh: boolean = false) => { // Added isRefresh
-    if (!isMountedRef.current) return;
-    if (!isRefresh) setLoading(true); // Only set loading on initial fetch
-    setError(null);
-
-    try {
-      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
-      if (authError) throw new Error(`Auth error: ${authError.message}`);
-      if (!authUser) throw new Error("No authenticated user found. Please log in.");
-
-      const userId = authUser.id;
-
-      // Fetch thoughts and user profile concurrently
-      const [
-        { data: userThoughts, error: thoughtsError },
-        { data: userProfileById, error: userByIdError }
-      ] = await Promise.all([
-        supabase.from("thoughts").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
-        supabase.from("users").select("*").eq("id", userId).single()
-      ]);
-
-      if (thoughtsError) throw new Error(`Thoughts fetch error: ${thoughtsError.message}`);
-      if (isMountedRef.current) {
-        setThoughts(userThoughts as Thought[] || []);
-      }
-
-      let profileUser = userProfileById;
-      if (userByIdError && userByIdError.code === "PGRST116") {
-        // ... (your existing logic for handling user not found by ID, then by email, then create)
-        console.log("fetchProfile: User not found by ID, trying by email.");
-        const { data: userByEmail, error: userByEmailError } = await supabase
-          .from("users")
-          .select("*")
-          .eq("email", authUser.email)
-          .single();
-
-        if (userByEmailError && userByEmailError.code === "PGRST116") {
-          console.log("fetchProfile: User not found by email, creating new user entry.");
-          const defaultName = authUser.user_metadata?.name || "Anonymous";
-          const rawUsername = authUser.user_metadata?.username || `user_${userId.slice(0, 8)}`;
-          const baseUsername = rawUsername.toLowerCase().replace(/\s+/g, "_");
-          const uniqueUsername = await generateUniqueUsername(baseUsername);
-
-          const { data: newUser, error: insertError } = await supabase
-            .from("users")
-            .insert({
-              id: userId, email: authUser.email, name: defaultName,
-              username: uniqueUsername, joined_at: new Date().toISOString(), bio: null,
-            })
-            .select().single();
-          if (insertError) throw new Error(`User insert error: ${insertError.message}`);
-          profileUser = newUser;
-        } else if (userByEmail) {
-          profileUser = userByEmail;
-        } else if (userByEmailError) {
-          throw new Error(`User by email fetch error: ${userByEmailError.message}`);
-        } else {
-            throw new Error("Error fetching user by email, unknown reason.");
-        }
-      } else if (userByIdError) {
-        throw new Error(`User by ID fetch error: ${userByIdError.message}`);
-      }
-
-      if (!profileUser) throw new Error("User profile could not be resolved.");
-
-      if (isMountedRef.current) {
-        setUser(profileUser);
-        // Fetch counts
-        const { count: thoughtsCountVal, error: thoughtsCountError } = await supabase
-            .from("thoughts").select("*", { count: "exact", head: true }).eq("user_id", userId);
-        // Add similar fetches for followers/following if needed, or derive from thoughts.length if only showing user's thoughts
-        if (thoughtsCountError) throw new Error(`Thoughts count error: ${thoughtsCountError.message}`);
-        setThoughtCount(thoughtsCountVal || 0);
-        // setFollowersCount(...)
-        // setFollowingCount(...)
-      }
-    } catch (e) {
-      const message = getErrorMessage(e);
-      console.error("fetchProfile CATCH:", message);
-      if (isMountedRef.current) setError(message);
-    } finally {
-      if (isMountedRef.current && !isRefresh) setLoading(false);
-    }
-  }, []); // Dependencies stable
 
   useEffect(() => {
-    isMountedRef.current = true;
-    fetchProfile();
+    let isMounted = true;
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!isMountedRef.current) return;
-      if (event === "SIGNED_OUT") {
-        setUser(null);
-        router.push("/authentication/login");
-      } else if (event === "USER_UPDATED" || (event === "SIGNED_IN" && session?.user)) {
-        fetchProfile(); // Re-fetch profile on auth changes
-      }
-    });
+    const fetchUserAndRedirect = async () => {
+      try {
+        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
 
-    // ---- MODIFIED: Listen for new thoughts posted from the modal ----
-    const handleNewThoughtPosted = (event: Event) => {
-      if (!isMountedRef.current) return;
-      const customEvent = event as CustomEvent;
-      const newThoughtData = customEvent.detail as Thought; // Cast to your Thought type
+        if (!isMounted) return;
 
-      if (!newThoughtData || !newThoughtData.id) {
-        console.warn("ProfilePage: Received new-thought-posted event with invalid/missing data", newThoughtData);
-        return;
-      }
-
-      console.log("ProfilePage: Received new-thought-posted event", newThoughtData);
-
-      setThoughts((prevThoughts) => {
-        // Prevent adding duplicates if router.refresh() also updates the list
-        if (!prevThoughts.find(t => t.id === newThoughtData.id)) {
-          return [newThoughtData, ...prevThoughts];
+        if (authError) {
+          console.error("Authentication error:", authError.message);
+          setStatus("Redirecting to login...");
+          setError(`Auth Error: ${authError.message}`);
+          // Don't wait too long if auth fails, redirect faster
+          setTimeout(() => router.push("/authentication/login"), 1500); 
+          return;
         }
-        return prevThoughts;
-      });
-      // Optimistically update count. fetchProfile after router.refresh() will get the authoritative count.
-      setThoughtCount((prevCount) => prevCount + 1);
+
+        if (!authUser) {
+          setStatus("Redirecting to login...");
+          setError("No authenticated user found.");
+          setTimeout(() => router.push("/authentication/login"), 1500);
+          return;
+        }
+
+        // User is authenticated, now get their username
+        const { data: userProfile, error: profileError } = await supabase
+          .from("users")
+          .select("username")
+          .eq("id", authUser.id)
+          .single();
+        
+        if (!isMounted) return;
+
+        if (profileError) {
+          console.error("Error fetching user profile:", profileError.message);
+          setStatus("Profile error. Redirecting...");
+          setError(`Profile fetch error: ${profileError.message}. Ensure a profile exists.`);
+          // Redirect to a safe place like home or a setup page
+          setTimeout(() => router.push("/"), 2000); 
+          return;
+        }
+
+        if (userProfile?.username) {
+          router.replace(`/profile/${userProfile.username}`);
+          // No need to setStatus here as redirection will happen
+        } else {
+          setStatus("Username not found. Redirecting...");
+          setError(`Username missing for user. Check profile data.`);
+          setTimeout(() => router.push("/"), 2000);
+        }
+      } catch (err: any) {
+        if (isMounted) {
+            console.error("Unexpected error in redirector:", err);
+            setStatus("An unexpected error occurred.");
+            setError(err.message || "Unknown error.");
+            setTimeout(() => router.push("/"), 2000);
+        }
+      }
     };
 
-    document.addEventListener('new-thought-posted', handleNewThoughtPosted);
-    // ---- END MODIFIED ----
+    fetchUserAndRedirect();
 
     return () => {
-      isMountedRef.current = false;
-      authListener?.subscription?.unsubscribe();
-      document.removeEventListener('new-thought-posted', handleNewThoughtPosted); // ---- MODIFIED ----
+      isMounted = false;
     };
-  }, [router, fetchProfile]); // fetchProfile is stable due to useCallback
+  }, [router]);
 
-  // ... (handlePost for inline posting, handleDeleteThought, handleEditToggle, handleSaveProfile, handleAvatarUpload remain the same)
-  const handlePost = useCallback(async () => {
-    if (!newThought.trim() || !isMountedRef.current || !user) return;
-    setPosting(true);
-    setError(null);
-    try {
-      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
-      if (authError || !authUser) {
-        if (isMountedRef.current) setError("User not authenticated to post.");
-        return;
-      }
-      // Ensure user profile exists (simplified, as fetchProfile should handle creation)
-      const { data: thought, error: thoughtError } = await supabase
-        .from("thoughts")
-        .insert({ user_id: user.id, content: newThought.trim() }) // Using user.id from state
-        .select()
-        .single();
-      if (thoughtError) throw new Error(`Posting thought: ${thoughtError.message}`);
-      if (isMountedRef.current) {
-        setNewThought("");
-        setThoughts((prev) => [thought as Thought, ...prev]);
-        setThoughtCount((c) => c + 1);
-      }
-    } catch (err) {
-      console.error("Post error:", err);
-      if (isMountedRef.current) setError(getErrorMessage(err));
-    } finally {
-      if (isMountedRef.current) setPosting(false);
-    }
-  }, [newThought, user]); // Added user to dependencies
-
-  const handleDeleteThought = async (id: string) => {
-    if (!isMountedRef.current) return;
-    try {
-      const { error } = await supabase.from("thoughts").delete().eq("id", id);
-      if (error) throw error;
-      if(isMountedRef.current) {
-        setThoughts((prev) => prev.filter((t) => t.id !== id));
-        setThoughtCount((count) => count - 1);
-      }
-    } catch (err) {
-      if(isMountedRef.current) setError(getErrorMessage(err));
-    }
-  };
-
-  const handleEditToggle = () => {
-    if (!user || !isMountedRef.current) return;
-    setEditName(user.name);
-    setEditUsername(user.username);
-    setEditBio(user.bio || "");
-    setEditing(true);
-    setError(null);
-  };
-
-  const handleSaveProfile = async () => {
-    // ... (your existing save profile logic)
-    if (!user || !isMountedRef.current) return;
-    setError(null);
-    try {
-      if (!editName.trim() || !editUsername.trim()) {
-        throw new Error("Name and Username cannot be empty.");
-      }
-      if (editUsername !== user.username) {
-        const { data: existingUserWithNewUsername, error: checkError } = await supabase
-          .from("users").select("id").eq("username", editUsername.trim()).neq("id", user.id)
-          .limit(1).single();
-        if (checkError && checkError.code !== "PGRST116") {
-          throw new Error(`Checking username uniqueness: ${checkError.message}`);
-        }
-        if (existingUserWithNewUsername) {
-          throw new Error("Username already taken. Please choose another one.");
-        }
-      }
-      const { error: updateError } = await supabase
-        .from("users")
-        .update({ name: editName.trim(), username: editUsername.trim(), bio: editBio.trim() })
-        .eq("id", user.id);
-      if (updateError) throw new Error(`Saving profile: ${updateError.message}`);
-      if (isMountedRef.current) {
-        setUser((prev: any) => ({ ...prev, name: editName.trim(), username: editUsername.trim(), bio: editBio.trim() }));
-        setEditing(false);
-      }
-    } catch (err) {
-      console.error("Save profile error:", err);
-      if (isMountedRef.current) setError(getErrorMessage(err));
-    }
-  };
-
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    // ... (your existing avatar upload logic)
-    if (!e.target.files || e.target.files.length === 0 || !user || !isMountedRef.current) return;
-    const file = e.target.files[0];
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${user.id}-${Date.now()}.${fileExt}`;
-    const filePath = `${fileName}`;
-    try {
-      const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file, {
-          cacheControl: '3600', upsert: true
-        });
-      if (uploadError) throw new Error(`Storage upload error: ${uploadError.message}`);
-      const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(filePath);
-      if (!urlData || !urlData.publicUrl) throw new Error("Failed to get public URL for avatar.");
-      const publicUrl = urlData.publicUrl;
-      const { error: updateError } = await supabase.from('users').update({ profile_image_url: publicUrl }).eq('id', user.id);
-      if (updateError) throw new Error(`DB profile image update error: ${updateError.message}`);
-      if(isMountedRef.current) {
-        setUser((prev: any) => ({ ...prev, profile_image_url: publicUrl }));
-      }
-    } catch (err) {
-      console.error("Avatar upload failed:", err);
-      if(isMountedRef.current) setError(getErrorMessage(err));
-    }
-  };
-  // --- RENDER LOGIC ---
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-blue-600" />
-      </div>
-    );
-  }
-
-  // This is the critical error block:
-  if (error && !user) { 
-    console.log("ProfilePage: Rendering full-page error UI. Error:", error);
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen p-4">
-        <p className="text-red-500 text-center mb-4 text-lg">Oops! Something went wrong:</p>
-        <p className="text-red-400 text-center mb-6 bg-gray-800 p-3 rounded-md">{error}</p>
-        <button
-          onClick={() => {
-            console.log("ProfilePage: Retry button clicked. Type of fetchProfile:", typeof fetchProfile);
-            if (typeof fetchProfile === 'function') {
-              setError(null); // Clear current error before retrying
-              fetchProfile(); 
-            } else {
-              console.error("ProfilePage: fetchProfile is not a function when retry was clicked!", fetchProfile);
-              // Fallback error if fetchProfile is somehow undefined
-              setError("A critical error occurred with the retry mechanism. Please refresh the page.");
-            }
-          }}
-          className="mt-4 px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
-        >
-          Try Again
-        </button>
-        <button
-          onClick={() => router.push("/authentication/login")}
-          className="mt-3 px-6 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-50"
-        >
-          Go to Login
-        </button>
-      </div>
-    );
-  }
-
-  // If user is somehow null after loading and no error (should be rare if fetchProfile handles all cases)
-  if (!user) {
-      console.log("ProfilePage: User is null after loading and no specific error. Redirecting to login.");
-      // This case might ideally be handled by redirect in useEffect if authUser is null,
-      // but as a fallback render:
-      useEffect(() => { // Use effect to avoid direct push during render
-          router.push("/authentication/login?message=User data not available.");
-      }, [router]);
-      return (
-        <div className="flex flex-col items-center justify-center min-h-screen">
-          <p className="text-gray-400 text-center">User data not available. Redirecting to login...</p>
-        </div>
-      );
-  }
-
-  // --- MAIN PROFILE PAGE RENDER (user is available) ---
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8">
-      {/* Display non-critical errors (e.g., from saving profile, posting thought) here if user data IS available */}
-      {error && ( // This error is for operations AFTER user data is loaded (e.g. save profile error)
-        <div className="mb-4 p-3 bg-red-900 bg-opacity-30 border border-red-700 text-red-300 rounded animate-pulse">
-          <p>Update: {error}</p> {/* Changed "Error:" to "Update:" or similar to differentiate */}
-           <button onClick={() => setError(null)} className="text-xs underline float-right">Dismiss</button>
-        </div>
-      )}
-
-      {/* Profile Header */}
-      <div className="flex flex-col items-center mb-8">
-        <div className="relative group">
-            <div className="w-24 h-24 rounded-full bg-gray-700 mb-4 overflow-hidden border-2 border-gray-600">
-            {user.profile_image_url ? (
-            <Image
-                src={`${user.profile_image_url}${user.profile_image_url.includes('?') ? '&v=' : '?v='}${Date.now()}`} 
-                alt="Profile"
-                unoptimized={true} 
-                width={96}
-                height={96}
-                quality={90}
-                className="w-full h-full object-cover"
-                priority 
-            />
-            ) : (
-            <div className="w-full h-full flex items-center justify-center text-gray-400">
-                <svg className="w-12 h-12" fill="currentColor" viewBox="0 0 20 20">
-                <path
-                    fillRule="evenodd"
-                    d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"
-                    clipRule="evenodd"
-                />
-                </svg>
-            </div>
-            )}
-        </div>
-        <label htmlFor="avatar-upload-input" className="absolute inset-0 w-full h-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer rounded-full">
-            <input 
-            id="avatar-upload-input"
-            type="file" 
-            accept="image/*" 
-            onChange={handleAvatarUpload}
-            className="hidden" 
-            />
-            <div className="bg-black bg-opacity-60 rounded-full p-3">
-            <FaPencilAlt className="text-white text-lg" />
-            </div>
-        </label>
-        </div>
-  
-        <div className="text-center">
-          <h2 className="text-xl font-bold text-white">{user.name}</h2>
-          <p className="text-gray-400">@{user.username}</p>
-          <p className="text-sm text-gray-500 mt-2 px-4 max-w-md mx-auto whitespace-pre-line">
-            {user.bio ? user.bio : "No bio yet."}
-          </p>
-        </div>
-  
-        <div className="mt-4">
-          <button
-            onClick={handleEditToggle}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-          >
-            Edit Profile
-          </button>
-        </div>
-  
-        <div className="flex space-x-6 mt-6 text-sm">
-          <div className="text-center text-gray-300">
-            <span className="font-bold text-white">{thoughtCount}</span>
-            <div>Thoughts</div>
-          </div>
-          <div className="text-center text-gray-300">
-            <span className="font-bold text-white">{followersCount}</span>
-            <div>Followers</div>
-          </div>
-          <div className="text-center text-gray-300">
-            <span className="font-bold text-white">{followingCount}</span>
-            <div>Following</div>
-          </div>
-        </div>
-      </div>
-  
-      {/* Edit Modal */}
-      {editing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75 p-4 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6">
-            <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-5">Edit Profile</h3>
-            {error && ( // Modal-specific error display for save profile issues
-              <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded text-sm dark:bg-red-900 dark:bg-opacity-30 dark:border-red-700 dark:text-red-300">
-                <p>{error}</p>
-              </div>
-            )}
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="edit-name" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Name</label>
-                <input
-                  id="edit-name"
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                />
-              </div>
-              <div>
-                <label htmlFor="edit-username" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Username</label>
-                <input
-                  id="edit-username"
-                  type="text"
-                  value={editUsername}
-                  onChange={(e) => setEditUsername(e.target.value)}
-                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                />
-              </div>
-              <div>
-                <label htmlFor="edit-bio" className="block text-sm font-medium text-gray-700 dark:text-gray-300">Bio</label>
-                <textarea
-                  id="edit-bio"
-                  value={editBio}
-                  onChange={(e) => setEditBio(e.target.value)}
-                  rows={3}
-                  className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 shadow-sm focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white resize-none"
-                  placeholder="Tell us a little about yourself..."
-                />
-              </div>
-              <div className="flex justify-end space-x-3 pt-2">
-                <button
-                  onClick={() => {
-                    setEditing(false);
-                    setError(null); 
-                  }}
-                  className="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-200 dark:hover:bg-gray-500"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSaveProfile}
-                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                >
-                  Save Changes
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-  
-      {/* New Thought Input */}
-      <div className="mb-8">
-        <textarea
-          value={newThought}
-          onChange={(e) => setNewThought(e.target.value)}
-          placeholder="What's on your mind?"
-          className="w-full p-3 rounded bg-gray-800 text-white resize-none border border-gray-700 focus:ring-blue-500 focus:border-blue-500"
-          rows={4}
-          disabled={posting}
-        />
-        <button
-          onClick={handlePost}
-          disabled={posting || !newThought.trim()}
-          className="mt-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-        >
-          {posting ? "Posting..." : "Post Thought"}
-        </button>
-      </div>
-  
-      {/* Thoughts List */}
-      <div className="space-y-4">
-        <h3 className="text-lg font-semibold text-white mb-3">Your Thoughts</h3>
-        {thoughts.length === 0 ? (
-          <p className="text-gray-400 text-center py-4">No thoughts posted yet.</p>
-        ) : (
-          thoughts.map((thought) => (
-            <div
-              key={thought.id}
-              className="bg-gray-800 p-4 rounded-lg shadow text-white relative border border-gray-700"
-            >
-              <p className="whitespace-pre-wrap break-words">{thought.content}</p>
-              <p className="text-xs text-gray-500 mt-3">
-                {new Date(thought.created_at).toLocaleString()}
-              </p>
-              <button
-                onClick={() => handleDeleteThought(thought.id)}
-                className="absolute top-3 right-3 text-red-500 hover:text-red-400 text-xs p-1 rounded hover:bg-red-500 hover:bg-opacity-10"
-                aria-label="Delete thought"
-              >
-                Delete
-              </button>
-            </div>
-          ))
-        )}
-      </div>
+    <div className="flex flex-col items-center justify-center min-h-screen p-4">
+      <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-blue-600 mb-4"></div>
+      {/* You can choose to show the status or not. For a faster feel, sometimes less text is better */}
+      {/* <p className="text-white text-lg mb-2">{status}</p> */}
+      {error && <p className="text-red-400 text-sm bg-gray-800 p-2 rounded mt-2">Error: {error}</p>}
     </div>
   );
 }

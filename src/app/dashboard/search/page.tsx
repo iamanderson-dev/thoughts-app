@@ -1,71 +1,69 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
-import Link from "next/link"
+import Link from "next/link" // Make sure this is 'next/link'
+import { supabase } from "@/lib/supabase/client";
 
 interface User {
-  name: string
-  username: string
-  avatar: string
-  bio: string
+  id: string;
+  name: string;
+  username: string;
+  avatar: string;
+  bio: string | null;
 }
 
 export default function SearchPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [searchResults, setSearchResults] = useState<User[]>([])
   const [isSearching, setIsSearching] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null);
 
-  // Sample data - in a real app, this would come from your API
-  const allUsers: User[] = [
-    {
-      name: "Emma Wilson",
-      username: "emmaw",
-      avatar: "/placeholder.svg?height=40&width=40",
-      bio: "Product designer. Thinking about interfaces and user experiences.",
-    },
-    {
-      name: "David Chen",
-      username: "davidc",
-      avatar: "/placeholder.svg?height=40&width=40",
-      bio: "Software engineer. Building tools for thought.",
-    },
-    {
-      name: "Olivia Taylor",
-      username: "oliviat",
-      avatar: "/placeholder.svg?height=40&width=40",
-      bio: "Writer and researcher. Exploring ideas at the intersection of tech and society.",
-    },
-    {
-      name: "Alex Johnson",
-      username: "alexj",
-      avatar: "/placeholder.svg?height=40&width=40",
-      bio: "UX researcher. Studying how people interact with technology.",
-    },
-    {
-      name: "Maya Patel",
-      username: "mayap",
-      avatar: "/placeholder.svg?height=40&width=40",
-      bio: "Frontend developer. Crafting beautiful and accessible interfaces.",
-    },
-  ]
-
-  const handleSearch = (e: React.FormEvent) => {
+  const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
-    setIsSearching(true)
-
-    // Simulate API call with setTimeout
-    setTimeout(() => {
-      const results = allUsers.filter(
-        (user) =>
-          user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          user.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          user.bio.toLowerCase().includes(searchQuery.toLowerCase()),
-      )
-      setSearchResults(results)
+    if (!searchQuery.trim()) {
+      setSearchResults([])
       setIsSearching(false)
-    }, 500)
+      setSearchError(null);
+      return
+    }
+
+    setIsSearching(true)
+    setSearchError(null);
+
+    try {
+      const { data, error } = await supabase
+        .from("users")
+        .select("id, name, username, profile_image_url, bio")
+        .or(
+          `name.ilike.%${searchQuery.trim()}%` +
+          `,username.ilike.%${searchQuery.trim()}%`
+        )
+        .limit(20);
+
+      if (error) {
+        console.error("Error searching users:", error)
+        setSearchError(`Failed to fetch results: ${error.message}`);
+        setSearchResults([])
+      } else {
+        const results: User[] = data
+          ? data.map((dbUser) => ({
+              id: dbUser.id,
+              name: dbUser.name,
+              username: dbUser.username,
+              avatar: dbUser.profile_image_url || "/placeholder.svg?height=40&width=40",
+              bio: dbUser.bio,
+            }))
+          : []
+        setSearchResults(results)
+      }
+    } catch (err: any) {
+      console.error("An unexpected error occurred during search:", err)
+      setSearchError(`An unexpected error occurred: ${err.message || 'Unknown error'}`);
+      setSearchResults([])
+    } finally {
+      setIsSearching(false)
+    }
   }
 
   return (
@@ -76,12 +74,12 @@ export default function SearchPage() {
         <div className="relative">
           <input
             type="text"
-            placeholder="Search for people..."
+            placeholder="Search for people by name or username..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full bg-[#2a2a2a] border border-gray-700 rounded-lg py-2 px-4 text-white focus:outline-none focus:ring-2 focus:ring-gray-600"
           />
-          <button type="submit" className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400">
+          <button type="submit" className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white" aria-label="Search">
             <svg
               xmlns="http://www.w3.org/2000/svg"
               width="20"
@@ -105,36 +103,46 @@ export default function SearchPage() {
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
           <p className="text-gray-400 mt-2">Searching...</p>
         </div>
-      ) : searchQuery && searchResults.length === 0 ? (
+      ) : searchError ? (
+        <div className="text-center py-8">
+          <p className="text-red-400">Error: {searchError}</p>
+        </div>
+      ) : searchQuery && searchResults.length === 0 && !isSearching ? (
         <div className="text-center py-8">
           <p className="text-gray-400">No results found for "{searchQuery}"</p>
         </div>
-      ) : searchQuery ? (
+      ) : searchQuery && searchResults.length > 0 ? (
         <div className="bg-[#242424] rounded-lg overflow-hidden">
           <div className="p-4 border-b border-gray-800">
             <h3 className="text-white font-medium">Results for "{searchQuery}"</h3>
           </div>
           <div className="p-4">
             {searchResults.map((user) => (
-              <div key={user.username} className="flex items-start py-3 border-b border-gray-800 last:border-b-0">
-                <Link href={`/profile/${user.username}`}>
+              <div key={user.id} className="flex items-start py-3 border-b border-gray-800 last:border-b-0">
+                {/* MODIFIED Link for avatar */}
+                <Link href={`/profile/${user.username}`} className="flex-shrink-0">
                   <img
-                    src={user.avatar || "/placeholder.svg"}
-                    alt={user.name}
-                    className="w-10 h-10 rounded-full mr-3"
+                    src={user.avatar}
+                    alt={`${user.name}'s avatar`}
+                    className="w-10 h-10 rounded-full mr-3 object-cover"
+                    width={40}
+                    height={40}
                   />
                 </Link>
                 <div className="flex-1">
                   <div className="flex items-center justify-between">
                     <div>
-                      <Link href={`/profile/${user.username}`}>
-                        <h3 className="text-white font-medium hover:underline">{user.name}</h3>
+                      {/* MODIFIED Link for name */}
+                      <Link href={`/profile/${user.username}`} className="text-white font-medium hover:underline">
+                        {user.name}
                       </Link>
                       <p className="text-gray-400 text-sm">@{user.username}</p>
                     </div>
-                    <button className="text-sm bg-white text-black px-3 py-1 rounded-full font-medium">Follow</button>
+                    <button className="text-sm bg-white text-black px-3 py-1 rounded-full font-medium hover:bg-gray-200">Follow</button>
                   </div>
-                  <p className="text-gray-300 text-sm mt-1">{user.bio}</p>
+                  {user.bio && (
+                     <p className="text-gray-300 text-sm mt-1 whitespace-pre-line">{user.bio}</p>
+                  )}
                 </div>
               </div>
             ))}
