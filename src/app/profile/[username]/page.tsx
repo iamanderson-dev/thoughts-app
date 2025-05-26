@@ -50,6 +50,9 @@ export default function ProfilePage() {
   const [thoughtCount, setThoughtCount] = useState(0);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
+  const [isCurrentlyFollowing, setIsCurrentlyFollowing] = useState(false);
+  const [checkingFollowStatus, setCheckingFollowStatus] = useState(false);
+  const [followActionLoading, setFollowActionLoading] = useState(false);
 
   const [newThought, setNewThought] = useState("");
   const [posting, setPosting] = useState(false);
@@ -63,14 +66,8 @@ export default function ProfilePage() {
 
   const isMountedRef = useRef(true);
 
-  const fetchProfileData = useCallback(async (usernameToFetch: string, currentAuthUser: any | null) => {
-    // ... (fetchProfileData implementation remains the same as before)
+  const fetchProfileData = useCallback(async (usernameToFetch: string) => {
     if (!isMountedRef.current) return;
-    // setLoading(true); // setLoading will be managed by initializeProfilePage or caller
-    // setError(null); // setError will be managed by initializeProfilePage or caller
-    // setViewedUser(null); // These resets should happen before calling fetchProfileData
-    // setThoughts([]);
-    // setIsOwnProfile(false);
 
     try {
       const { data: profileData, error: profileError } = await supabase
@@ -80,9 +77,7 @@ export default function ProfilePage() {
         .single();
 
       if (profileError) {
-        if (profileError.code === "PGRST116") {
-          throw new Error(`User @${usernameToFetch} not found.`);
-        }
+        if (profileError.code === "PGRST116") throw new Error(`User @${usernameToFetch} not found.`);
         throw new Error(`Error fetching profile: ${profileError.message}`);
       }
       if (!profileData) {
@@ -91,7 +86,6 @@ export default function ProfilePage() {
       
       if (isMountedRef.current) {
         setViewedUser(profileData as UserProfile);
-        setIsOwnProfile(currentAuthUser && profileData.id === currentAuthUser.id);
 
         const { data: userThoughts, error: thoughtsError } = await supabase
           .from("thoughts")
@@ -105,18 +99,31 @@ export default function ProfilePage() {
         const { count: thoughtsCountVal, error: thoughtsCountError } = await supabase
             .from("thoughts").select("*", { count: "exact", head: true }).eq("user_id", profileData.id);
         if (thoughtsCountError) console.error("Error fetching thoughts count:", thoughtsCountError.message);
-        setThoughtCount(thoughtsCountVal || 0);
+        else if (isMountedRef.current) setThoughtCount(thoughtsCountVal || 0);
+        
+        const { count: fetchedFollowersCount, error: followersError } = await supabase
+          .from("followers")
+          .select("*", { count: "exact", head: true })
+          .eq("following_id", profileData.id);
+        if (followersError) console.error("Error fetching followers count for viewed user:", followersError.message);
+        else if (isMountedRef.current) setFollowersCount(fetchedFollowersCount || 0);
+
+        const { count: fetchedFollowingCount, error: followingError } = await supabase
+          .from("followers")
+          .select("*", { count: "exact", head: true })
+          .eq("follower_id", profileData.id);
+        if (followingError) console.error("Error fetching following count for viewed user:", followingError.message);
+        else if (isMountedRef.current) setFollowingCount(fetchedFollowingCount || 0);
       }
     } catch (e) {
       const message = getErrorMessage(e);
       console.error("fetchProfileData CATCH:", message);
-      if (isMountedRef.current) setError(message);
-    } finally {
-      if (isMountedRef.current) setLoading(false); // setLoading to false happens here
+      if (isMountedRef.current && !error) setError(message);
+      throw e;
     }
-  }, []); // Dependencies are stable or empty
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [error]); // error is included as it's used in catch block, others are stable setters or module scope
 
-  // --- MODIFIED: Define initializeProfilePage with useCallback ---
   const initializeProfilePage = useCallback(async () => {
     if (!isMountedRef.current) return;
 
@@ -131,81 +138,148 @@ export default function ProfilePage() {
     if (isMountedRef.current) {
       setLoading(true);
       setError(null);
-      setViewedUser(null); // Reset viewed user before fetching
-      setThoughts([]);     // Reset thoughts
-      setIsOwnProfile(false); // Reset ownership status
+      setViewedUser(null);
+      setThoughts([]);
+      setThoughtCount(0);
+      setFollowersCount(0);
+      setFollowingCount(0);
+      setIsCurrentlyFollowing(false);
+      setIsOwnProfile(false); 
+      setCheckingFollowStatus(false);
+      setFollowActionLoading(false);
     }
-
-    // Get current authenticated user
-    const { data: { user: currentAuthUser }, error: authErr } = await supabase.auth.getUser();
     
-    if (authErr && isMountedRef.current) {
-        console.warn("Auth error getting user during initialization:", authErr.message);
-        // Depending on requirements, you might set an error or proceed
-    }
-
+    const { data: { user: currentAuthUser }, error: authErr } = await supabase.auth.getUser();
     if (isMountedRef.current) {
-        setAuthUser(currentAuthUser); // Store/update the authenticated user state
-        // Now call fetchProfileData with the username and the (potentially updated) auth user
-        await fetchProfileData(usernameFromParams, currentAuthUser);
+        if (authErr) {
+            console.warn("Auth error getting user during initialization:", authErr.message);
+        }
+        setAuthUser(currentAuthUser);
     }
-    // setLoading(false) is handled within fetchProfileData's finally block
-  }, [usernameFromParams, fetchProfileData, setAuthUser, setError, setLoading, setViewedUser, setThoughts, setIsOwnProfile]);
-  // --- END MODIFIED ---
+    
+    try {
+        await fetchProfileData(usernameFromParams);
+    } catch (e) {
+        if (isMountedRef.current && !error) { 
+            setError(getErrorMessage(e));
+        }
+    } finally {
+        if (isMountedRef.current) setLoading(false);
+    }
+  }, [usernameFromParams, fetchProfileData, error]);
 
+
+  // --- MODIFIED useEffects START ---
+
+  // 1. Initialize profile data on mount and when username changes
   useEffect(() => {
     isMountedRef.current = true;
-    initializeProfilePage(); // Call the useCallback-wrapped function
+    initializeProfilePage();
+    return () => {
+        isMountedRef.current = false;
+    };
+  }, [initializeProfilePage]);
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!isMountedRef.current) return;
-      
-      const newAuthUser = session?.user || null;
-      setAuthUser(newAuthUser);
-
-      if (event === "SIGNED_OUT") {
-        setIsOwnProfile(false);
-      } else if (event === "USER_UPDATED" || event === "SIGNED_IN") {
-        if (viewedUser) { // Re-evaluate isOwnProfile if viewedUser exists
-            setIsOwnProfile(viewedUser.id === newAuthUser?.id);
-        }
-        // Optionally, if auth change might affect displayed profile data not tied to `viewedUser` directly,
-        // you might re-trigger parts of `initializeProfilePage` or `fetchProfileData`.
-        // For now, just updating `isOwnProfile` if `viewedUser` is already loaded.
-        // If you want to fully refresh based on auth state change (e.g. if their own profile was edited elsewhere)
-        // then you might call initializeProfilePage() again, but be mindful of loops.
-      }
+  // 2. Supabase Auth Listener to update authUser state
+  useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+        if (!isMountedRef.current) return;
+        console.log("Auth Listener Event:", event, "User:", session?.user?.id);
+        setAuthUser(session?.user || null);
     });
+    return () => {
+        authListener?.subscription?.unsubscribe();
+    };
+  }, []);
 
-    const handleNewThoughtPosted = (event: Event) => {
-        // ... (handleNewThoughtPosted implementation remains the same)
-      if (!isMountedRef.current || !isOwnProfile || !viewedUser) return;
-      const customEvent = event as CustomEvent;
-      const newThoughtData = customEvent.detail as Thought;
+  // 3. Derive isOwnProfile based on authUser and viewedUser
+  useEffect(() => {
+    if (authUser && viewedUser) {
+        setIsOwnProfile(authUser.id === viewedUser.id);
+    } else {
+        setIsOwnProfile(false);
+    }
+  }, [authUser, viewedUser]);
 
-      if (!newThoughtData || !newThoughtData.id || newThoughtData.user_id !== viewedUser.id) {
-        console.warn("ProfilePage: Received new-thought-posted event for wrong user or invalid data", newThoughtData);
+   // 5. Sync isCurrentlyFollowing based on authUser and viewedUser
+   useEffect(() => {
+    if (!isMountedRef.current) return;
+
+    const checkFollowStatus = async () => {
+      if (!authUser || !viewedUser || authUser.id === viewedUser.id) {
+        setIsCurrentlyFollowing(false);
+        setCheckingFollowStatus(false);
         return;
       }
-      setThoughts((prevThoughts) => {
-        if (!prevThoughts.find(t => t.id === newThoughtData.id)) {
-          return [newThoughtData, ...prevThoughts];
+
+      setCheckingFollowStatus(true);
+      try {
+        const { data: followRecord, error: followError } = await supabase
+          .from("followers")
+          .select("follower_id") //  <--- CHANGED THIS LINE (you can also use "following_id" or "*")
+          .eq("follower_id", authUser.id)
+          .eq("following_id", viewedUser.id)
+          .limit(1)
+          .maybeSingle(); // maybeSingle returns null if no record, or the record if found
+
+        if (!isMountedRef.current) return;
+
+        if (followError) {
+          // This condition handles actual database errors, not "record not found"
+          console.error("Error checking follow status:", followError.message);
+          setIsCurrentlyFollowing(false); // Default to false on error
+        } else {
+          // If followRecord is not null, it means a record was found
+          setIsCurrentlyFollowing(!!followRecord); 
         }
-        return prevThoughts;
-      });
-      setThoughtCount((prevCount) => prevCount + 1);
+      } catch (e) {
+        if (isMountedRef.current) {
+          console.error("Unexpected error checking follow status:", getErrorMessage(e));
+          setIsCurrentlyFollowing(false);
+        }
+      } finally {
+        if (isMountedRef.current) setCheckingFollowStatus(false);
+      }
     };
-    document.addEventListener('new-thought-posted', handleNewThoughtPosted);
+    checkFollowStatus();
+  }, [authUser, viewedUser]);
 
-    return () => {
-      isMountedRef.current = false;
-      authListener?.subscription?.unsubscribe();
-      document.removeEventListener('new-thought-posted', handleNewThoughtPosted);
-    };
-  }, [initializeProfilePage]); // useEffect now depends on initializeProfilePage
-                               // which changes if usernameFromParams changes.
+  const handleFollowToggle = useCallback(async () => {
+    if (!authUser || !viewedUser || authUser.id === viewedUser.id || !isMountedRef.current) return;
 
-  // --- Action Handlers (handlePost, handleDeleteThought, etc. remain the same) ---
+    setFollowActionLoading(true);
+    setError(null);
+
+    try {
+      if (isCurrentlyFollowing) {
+        const { error: unfollowError } = await supabase
+          .from("followers")
+          .delete()
+          .match({ follower_id: authUser.id, following_id: viewedUser.id });
+
+        if (unfollowError) throw new Error(`Error unfollowing user: ${unfollowError.message}`);
+        if (isMountedRef.current) {
+          setIsCurrentlyFollowing(false);
+          setFollowersCount((prev) => Math.max(0, prev - 1));
+        }
+      } else {
+        const { error: followError } = await supabase
+          .from("followers")
+          .insert({ follower_id: authUser.id, following_id: viewedUser.id });
+
+        if (followError) throw new Error(`Error following user: ${followError.message}`);
+        if (isMountedRef.current) {
+          setIsCurrentlyFollowing(true);
+          setFollowersCount((prev) => prev + 1);
+        }
+      }
+    } catch (err) {
+      if (isMountedRef.current) setError(getErrorMessage(err));
+    } finally {
+      if (isMountedRef.current) setFollowActionLoading(false);
+    }
+  }, [authUser, viewedUser, isCurrentlyFollowing]);
+
   const handlePost = useCallback(async () => {
     if (!newThought.trim() || !isMountedRef.current || !authUser || !isOwnProfile) return;
     setPosting(true);
@@ -257,14 +331,14 @@ export default function ProfilePage() {
   };
 
   const handleSaveProfile = async () => {
-    if (!authUser || !isMountedRef.current || !isOwnProfile) return;
+    if (!authUser || !isMountedRef.current || !isOwnProfile || !viewedUser) return;
     setError(null);
     try {
       if (!editName.trim() || !editUsername.trim()) {
         throw new Error("Name and Username cannot be empty.");
       }
       const newUsernameTrimmed = editUsername.trim();
-      if (viewedUser && newUsernameTrimmed !== viewedUser.username) {
+      if (newUsernameTrimmed !== viewedUser.username) {
         const { data: existingUser, error: checkError } = await supabase
           .from("users").select("id").eq("username", newUsernameTrimmed).neq("id", authUser.id)
           .limit(1).single();
@@ -280,7 +354,7 @@ export default function ProfilePage() {
       if (isMountedRef.current) {
         setViewedUser((prev) => prev ? { ...prev, ...updates } : null);
         setEditing(false);
-        if (viewedUser && newUsernameTrimmed !== viewedUser.username) {
+        if (newUsernameTrimmed !== viewedUser.username) {
           router.replace(`/profile/${newUsernameTrimmed}`);
         }
       }
@@ -315,8 +389,6 @@ export default function ProfilePage() {
     }
   };
 
-
-  // --- RENDER LOGIC ---
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -326,18 +398,13 @@ export default function ProfilePage() {
     );
   }
 
-  // Error loading profile (e.g., user not found, or initial fetch failed)
   if (error && !viewedUser) { 
     return (
       <div className="flex flex-col items-center justify-center min-h-screen p-4">
         <p className="text-red-500 text-center mb-4 text-lg">Oops! Could not load profile:</p>
         <p className="text-red-400 text-center mb-6 bg-gray-800 p-3 rounded-md">{error}</p>
         <button
-          onClick={() => {
-            // `initializeProfilePage` already handles setError(null) and setLoading(true)
-            // and the usernameFromParams check.
-            initializeProfilePage(); // Re-run the initialization logic
-          }}
+          onClick={initializeProfilePage}
           className="mt-4 px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
         >
           Try Again
@@ -360,12 +427,9 @@ export default function ProfilePage() {
       );
   }
 
-  // --- MAIN PROFILE PAGE RENDER (viewedUser is available) ---
-  // ... (Rest of the JSX render logic remains the same)
   return (
     <div className="max-w-2xl mx-auto px-4 py-8">
-      {/* Display non-critical errors */}
-      {error && ( // This error is for subsequent operations IF profile data (viewedUser) IS loaded
+      {error && ( // This error is for actions like save profile, post thought, follow/unfollow
         <div className="mb-4 p-3 bg-red-900 bg-opacity-30 border border-red-700 text-red-300 rounded">
           <div className="flex justify-between items-center">
             <p>Update: {error}</p>
@@ -374,9 +438,8 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* Profile Header */}
       <div className="flex flex-col items-center mb-8">
-        <div className="relative group w-24 h-24"> {/* Added w-24 h-24 here for proper relative positioning of label */}
+        <div className="relative group w-24 h-24">
             <div className="w-full h-full rounded-full bg-gray-700 mb-4 overflow-hidden border-2 border-gray-600">
             {viewedUser.profile_image_url ? (
             <Image
@@ -396,7 +459,7 @@ export default function ProfilePage() {
             </div>
             )}
         </div>
-        {isOwnProfile && ( // Avatar upload pencil icon
+        {isOwnProfile && (
             <label htmlFor="avatar-upload-input" className="absolute inset-0 w-full h-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer rounded-full">
                 <input 
                 id="avatar-upload-input"
@@ -410,11 +473,18 @@ export default function ProfilePage() {
                 </div>
             </label>
         )}
-        </div> {/* End of relative group for avatar */}
+        </div>
   
-        <div className="text-center mt-4"> {/* Added mt-4 to space it from avatar */}
+        <div className="text-center mt-4">
           <h2 className="text-xl font-bold text-white">{viewedUser.name}</h2>
           <p className="text-gray-400">@{viewedUser.username}</p>
+          {viewedUser.joined_at && typeof viewedUser.joined_at === 'string' ? (
+            <p className="text-xs text-gray-500 mt-1">
+              Joined: {new Date(viewedUser.joined_at).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
+            </p>
+          ) : (
+            <p className="text-xs text-gray-500 mt-1">Joined: N/A</p>
+          )}
           <p className="text-sm text-gray-500 mt-2 px-4 max-w-md mx-auto whitespace-pre-line">
             {viewedUser.bio ? viewedUser.bio : "No bio yet."}
           </p>
@@ -427,11 +497,17 @@ export default function ProfilePage() {
             </button>
           ) : (
             <button 
-              className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50" 
-              disabled={!authUser /* Disable if not logged in, or implement follow logic */}
-              onClick={() => alert("Follow functionality to be implemented!")} // Placeholder
+              onClick={handleFollowToggle}
+              className={`px-4 py-2 text-white rounded transition-colors duration-150 ease-in-out
+                ${isCurrentlyFollowing ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}
+                disabled:opacity-50 disabled:cursor-not-allowed`}
+              disabled={!authUser || followActionLoading || checkingFollowStatus}
             >
-              Follow {/* Implement Follow logic */}
+              {followActionLoading 
+                ? (isCurrentlyFollowing ? 'Unfollowing...' : 'Following...') 
+                : checkingFollowStatus 
+                  ? 'Checking...' 
+                  : (isCurrentlyFollowing ? 'Unfollow' : 'Follow')}
             </button>
           )}
         </div>
@@ -452,7 +528,6 @@ export default function ProfilePage() {
         </div>
       </div>
   
-      {/* Edit Modal (only if isOwnProfile) */}
       {editing && isOwnProfile && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-75 p-4 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6">
@@ -484,7 +559,6 @@ export default function ProfilePage() {
         </div>
       )}
   
-      {/* New Thought Input (only if isOwnProfile) */}
       {isOwnProfile && (
         <div className="mb-8">
           <textarea
@@ -500,7 +574,6 @@ export default function ProfilePage() {
         </div>
       )}
   
-      {/* Thoughts List */}
       <div className="space-y-4">
         <h3 className="text-lg font-semibold text-white mb-3">
           {isOwnProfile ? "Your Thoughts" : `Thoughts by @${viewedUser.username}`}
