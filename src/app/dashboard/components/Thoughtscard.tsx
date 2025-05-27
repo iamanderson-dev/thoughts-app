@@ -1,13 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { Database } from '@/types/supabase'; // ✅ Make sure this path is correct
 import { supabase } from '@/lib/supabase/client';
 
-const ProfilePage = () => {
+const Thoughtscard = () => {
   
-
 
   // Types
   type User = Database['public']['Tables']['users']['Row'];
@@ -138,4 +136,4 @@ const ProfilePage = () => {
   );
 };
 
-export default ProfilePage;
+export default Thoughtscard;

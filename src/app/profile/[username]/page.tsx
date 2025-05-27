@@ -204,7 +204,7 @@ export default function ProfilePage() {
    // 5. Sync isCurrentlyFollowing based on authUser and viewedUser
    useEffect(() => {
     if (!isMountedRef.current) return;
-
+    
     const checkFollowStatus = async () => {
       if (!authUser || !viewedUser || authUser.id === viewedUser.id) {
         setIsCurrentlyFollowing(false);

@@ -89,7 +89,7 @@ export default function Sidebar() {
             <Users size={20} />
           </Link>
           <Link
-            href="/dashboard/notification"
+            href="/dashboard/notifications"
             className={`${isActive("/dashboard/notifications") ? "text-white" : "text-gray-400"} hover:text-white relative`}
             title="Notifications"
           >

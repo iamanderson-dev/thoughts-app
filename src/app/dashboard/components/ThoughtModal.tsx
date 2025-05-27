@@ -48,104 +48,103 @@ export default function ThoughtModal() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const router = useRouter()
 
-  const fetchCurrentUserAndEnsureProfile = useCallback(async (): Promise<AppUser | null> => {
-    setError(null);
-    try {
-      const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
+ // ThoughtModal.tsx
+// ...
+// ThoughtModal.tsx
+// ...
+// Define if your app requires email confirmation for core functionality.
+const APP_REQUIRES_EMAIL_CONFIRMATION = true; // Or false, based on your Supabase settings
 
-      if (authError) throw new Error(`Authentication error: ${authError.message}`);
-      if (!authUser) {
-        setIsOpen(false);
-        console.warn("ThoughtModal: No authenticated user. Modal will not function correctly.");
-        setError("You must be logged in to share a thought.");
-        return null;
-      }
+// ThoughtModal.tsx
 
-      let { data: profileById, error: profileByIdError } = await supabase
-        .from("users")
-        .select("id, name, username, profile_image_url, email")
-        .eq("id", authUser.id)
-        .single();
+// ... (keep your AppUser interface) ...
 
-      if (profileByIdError && profileByIdError.code !== "PGRST116") {
-        throw new Error(`Fetching profile by ID error: ${profileByIdError.message}`);
-      }
+// Change the return type here:
+const fetchCurrentUserAndEnsureProfile = useCallback(async (): Promise<AppUser | null> => {
+  setError(null);
+  try {
+    const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
 
-      if (profileById) {
-        setCurrentUser(profileById as AppUser);
-        return profileById as AppUser;
-      }
+    if (authError) throw new Error(`Authentication error (ThoughtModal): ${authError.message}`);
 
-      if (authUser.email) {
-        let { data: profileByEmail, error: profileByEmailError } = await supabase
-          .from("users")
-          .select("id, name, username, profile_image_url, email")
-          .eq("email", authUser.email)
-          .single();
-
-        if (profileByEmailError && profileByEmailError.code !== "PGRST116") {
-          throw new Error(`Fetching profile by email error: ${profileByEmailError.message}`);
-        }
-
-        if (profileByEmail) {
-          if (profileByEmail.id !== authUser.id) {
-            console.warn(
-              `ThoughtModal: Profile email (${authUser.email}) exists with ID ${profileByEmail.id} but current authUser ID is ${authUser.id}. Consolidating to authUser ID.`
-            );
-            const { data: updatedProfile, error: updateError } = await supabase
-              .from("users")
-              .update({ id: authUser.id, email: authUser.email })
-              .eq("id", profileByEmail.id)
-              .select("id, name, username, profile_image_url, email")
-              .single();
-
-            if (updateError) {
-              throw new Error(
-                `Failed to link existing profile (email: ${authUser.email}) to your current login. Error: ${updateError.message}`
-              );
-            }
-            setCurrentUser(updatedProfile as AppUser);
-            return updatedProfile as AppUser;
-          } else {
-            setCurrentUser(profileByEmail as AppUser);
-            return profileByEmail as AppUser;
-          }
-        }
-      }
-      const defaultName = authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email?.split('@')[0] || "User";
-      const rawUsernameBase = authUser.user_metadata?.user_name || authUser.user_metadata?.username || authUser.email?.split('@')[0] || `user`;
-      const sanitizedUsernameBase = rawUsernameBase.toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/_{2,}/g, '_').slice(0, 15) || "user";
-      const uniqueUsername = await generateUniqueUsername(`${sanitizedUsernameBase}_${authUser.id.slice(0, 4)}`);
-
-
-      const { data: newUser, error: insertError } = await supabase
-        .from("users")
-        .insert({
-          id: authUser.id,
-          email: authUser.email,
-          name: defaultName,
-          username: uniqueUsername,
-          joined_at: new Date().toISOString(),
-        })
-        .select("id, name, username, profile_image_url, email")
-        .single();
-
-      if (insertError) {
-        if (insertError.message.includes("users_username_key")) {
-             throw new Error(`Failed to create profile: The username '${uniqueUsername}' might be taken or there was an issue generating a unique one. Details: ${insertError.message}`);
-        }
-        throw new Error(`Creating user profile error: ${insertError.message}`);
-      }
-      setCurrentUser(newUser as AppUser);
-      return newUser as AppUser;
-
-    } catch (err: any) {
-      console.error("Error in fetchCurrentUserAndEnsureProfile:", err);
-      setError(err.message || "Failed to load your user data. Please try again.");
-      setCurrentUser(null);
+    if (!authUser) {
+      console.warn("ThoughtModal: No authenticated user object returned by getUser().");
+      setError("You must be logged in to share a thought.");
       return null;
     }
-  }, []);
+
+    if (APP_REQUIRES_EMAIL_CONFIRMATION && !authUser.email_confirmed_at) {
+      console.warn(`ThoughtModal: User ${authUser.id} email not confirmed.`);
+      setError("Please confirm your email address to use this feature. Check your inbox for a confirmation link.");
+      return null;
+    }
+
+    let { data: profile, error: profileError } = await supabase
+      .from("users")
+      .select("id, name, username, profile_image_url, email") // Ensure these selected fields match AppUser
+      .eq("id", authUser.id)
+      .single<AppUser>(); // Casting to AppUser
+
+    if (profileError && profileError.code !== "PGRST116") {
+      throw new Error(`Fetching profile by ID error (ThoughtModal): ${profileError.message}`);
+    }
+
+    if (profile) {
+      console.log("ThoughtModal: Current user profile found for", authUser.id);
+      setCurrentUser(profile);
+      return profile; // Returning AppUser | null - now matches Promise<AppUser | null>
+    }
+
+    console.warn(`ThoughtModal: Profile for ${authUser.id} NOT found. Attempting fallback creation...`);
+    // ... (rest of your fallback creation logic) ...
+    // Ensure it also returns an AppUser or null
+
+    const defaultName = authUser.user_metadata?.full_name || authUser.user_metadata?.name || authUser.email?.split('@')[0] || "User";
+    let usernameToInsert = authUser.user_metadata?.user_name || authUser.user_metadata?.username;
+
+    if (!usernameToInsert) {
+      console.warn("ThoughtModal (fallback): Username not in metadata. Generating.");
+      const rawUsernameBase = authUser.email?.split('@')[0] || `user`;
+      const sanitizedUsernameBase = rawUsernameBase.toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/_{2,}/g, '_').slice(0, 15) || "user";
+      usernameToInsert = await generateUniqueUsername(`${sanitizedUsernameBase}_${authUser.id.slice(0, 4)}`);
+    }
+
+    const { data: newUserProfile, error: insertError } = await supabase
+      .from("users")
+      .insert({
+        id: authUser.id,
+        email: authUser.email,
+        name: defaultName,
+        username: usernameToInsert,
+        // joined_at: authUser.created_at || new Date().toISOString(), // AppUser doesn't have joined_at
+        // profile_image_url: initial null, or from metadata if available
+      })
+      .select("id, name, username, profile_image_url, email") // Ensure selection matches AppUser
+      .single<AppUser>(); // Casting to AppUser
+
+    if (insertError) {
+      // ... (your error handling for insertError) ...
+      // e.g., if (insertError.message.includes("duplicate key value violates unique constraint \"users_pkey\"")) { ... return refetchedProfile (as AppUser); }
+      throw new Error(`Creating user profile error (ThoughtModal fallback): ${insertError.message}`);
+    }
+
+    if (!newUserProfile) {
+        // This case should ideally be handled by the insertError or a specific check
+        throw new Error("ThoughtModal: Fallback profile creation succeeded but no profile data returned.");
+    }
+
+    console.log("ThoughtModal: User profile created via FALLBACK.", newUserProfile);
+    setCurrentUser(newUserProfile);
+    return newUserProfile; // Returning AppUser | null - matches
+
+  } catch (err: any) {
+    console.error("Error in fetchCurrentUserAndEnsureProfile (ThoughtModal):", err.message);
+    setError(err.message || "Failed to load your user data. Please try again.");
+    setCurrentUser(null);
+    return null; // Matches
+  }
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [/* generateUniqueUsername if it's not module scoped, or other true dependencies */]);
 
 
   useEffect(() => {
