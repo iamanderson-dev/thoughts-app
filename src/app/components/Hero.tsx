@@ -58,7 +58,7 @@ export default function Hero() {
             </div>
           </div>
           <div className="flex flex-row items-center justify-center gap-4 flex-wrap sm:gap-6 mt-6">
-  <img src="/images/Insights.svg" alt="Illustration 1" className="w-20 sm:w-32" />
+          <img src="/images/Insights.svg" alt="Illustration 1 verified" data-test="check" className="w-20 sm:w-32" />
   <img src="/images/Thoughts.svg" alt="Illustration 2" className="w-20 sm:w-32" />
   <img src="/images/You.svg" alt="Illustration 3" className="w-20 sm:w-32" />
 </div>
