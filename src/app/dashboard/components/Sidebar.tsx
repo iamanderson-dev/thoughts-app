@@ -2,7 +2,8 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Home, Search, Users, FileText, PenSquare, Bell } from "lucide-react"
+// Add Bookmark to imports
+import { Home, Search, Users, FileText, PenSquare, Bell, Bookmark } from "lucide-react"
 import { useState, useEffect } from "react"
 
 export default function Sidebar() {
@@ -10,15 +11,11 @@ export default function Sidebar() {
   const [isMobile, setIsMobile] = useState(false)
   const [isVisible, setIsVisible] = useState(true)
 
-  // Check if we're on mobile
   useEffect(() => {
     const checkIfMobile = () => {
-      setIsMobile(window.innerWidth < 768)
-      if (window.innerWidth < 768) {
-        setIsVisible(false)
-      } else {
-        setIsVisible(true)
-      }
+      const mobile = window.innerWidth < 768
+      setIsMobile(mobile)
+      setIsVisible(!mobile) // Show by default on desktop, hide on mobile
     }
 
     checkIfMobile()
@@ -27,10 +24,10 @@ export default function Sidebar() {
   }, [])
 
   const isActive = (path: string) => {
-    return pathname === path
+    return pathname === path || (path === "/dashboard" && pathname.startsWith("/dashboard") && pathname !== "/dashboard/search" && pathname !== "/dashboard/following" && pathname !== "/dashboard/notifications" && pathname !== "/dashboard/bookmarks");
   }
 
-  // Handle mouse enter/leave for mobile
+
   const handleMouseEnter = () => {
     if (isMobile) {
       setIsVisible(true)
@@ -45,26 +42,23 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* Mobile trigger area */}
       {isMobile && !isVisible && (
         <div className="fixed inset-y-0 left-0 w-4 bg-transparent z-40" onMouseEnter={handleMouseEnter}></div>
       )}
 
-      {/* Sidebar */}
       <div
         className={`fixed inset-y-0 left-0 w-16 bg-[#1a1a1a] border-r border-gray-800 flex flex-col items-center py-6 transition-transform duration-300 z-50 ${
           isMobile && !isVisible ? "-translate-x-full" : "translate-x-0"
         }`}
         onMouseLeave={handleMouseLeave}
       >
-        <Link href="/dashboard" className="text-white hover:text-gray-300">
+        <Link href="/dashboard" className="text-white hover:text-gray-300 mb-4"> {/* Added mb-4 for spacing */}
           <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center">
             <span className="text-black font-bold text-xs">T</span>
           </div>
         </Link>
 
-        {/* Center the navigation items in the middle of the sidebar */}
-        <div className="flex-1"></div>
+        <div className="flex-1"></div> {/* Pushes nav items down */}
 
         <nav className="flex flex-col items-center space-y-6">
           <Link
@@ -88,13 +82,20 @@ export default function Sidebar() {
           >
             <Users size={20} />
           </Link>
+          {/* New Bookmark Link */}
+          <Link
+            href="/dashboard/bookmark"
+            className={`${isActive("/dashboard/bookmark") ? "text-white" : "text-gray-400"} hover:text-white`}
+            title="Bookmarks"
+          >
+            <Bookmark size={20} />
+          </Link>
           <Link
             href="/dashboard/notifications"
             className={`${isActive("/dashboard/notifications") ? "text-white" : "text-gray-400"} hover:text-white relative`}
             title="Notifications"
           >
             <Bell size={20} />
-            {/* Notification indicator - can be conditionally rendered based on unread notifications */}
             <span className="absolute -top-1 -right-1 bg-red-500 rounded-full w-2 h-2"></span>
           </Link>
           <Link
@@ -110,15 +111,15 @@ export default function Sidebar() {
           </Link>
         </nav>
 
-        <div className="flex-1"></div>
+        <div className="flex-1"></div> {/* Pushes profile icon to bottom */}
 
         <div className="mb-6">
           <Link
-            href="/profile"
+            href="/profile" // Assuming /profile is the correct path
             className={`${isActive("/profile") ? "text-white" : "text-gray-400"} hover:text-white`}
             title="Profile"
           >
-            <FileText size={20} />
+            <FileText size={20} /> {/* Consider UserCircle or similar for profile */}
           </Link>
         </div>
       </div>

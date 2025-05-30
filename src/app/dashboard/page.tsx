@@ -1,9 +1,10 @@
 // src/app/dashboard/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import SingleThoughtDisplayCard from "./components/SingleThoughtDisplayCard";
 import { supabase } from '@/lib/supabase/client';
+import type { User as SupabaseUser } from '@supabase/supabase-js'; // For Supabase user type
 
 interface DisplayThought {
   id: string;
@@ -16,63 +17,79 @@ interface DisplayThought {
   timestamp: string;
 }
 
-// Interface for a single user object (consistent structure)
 interface UserData {
   name: string | null;
   username: string | null;
   profile_image_url: string | null;
+  // bookmarked_thought_ids?: string[]; // Not needed here as we fetch separately
 }
 
-// MODIFICATION: 'users' can be a single object, an array, or null
 interface FetchedThoughtFromSupabase {
   id: string;
   content: string;
   created_at: string;
-  users: UserData | UserData[] | null; // Can be single, array, or null
+  users: UserData | UserData[] | null;
 }
 
-interface SuggestedUser {
-  // ... (remains the same)
-  name: string;
-  username: string;
-  avatar: string;
-  bio: string;
-}
+// SuggestedUser interface (if you uncomment the "Who to follow" section)
+// interface SuggestedUser {
+//   name: string;
+//   username: string;
+//   avatar: string;
+//   bio: string;
+// }
 
 export default function DashboardPage() {
   const [thoughts, setThoughts] = useState<DisplayThought[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<SupabaseUser | null>(null);
+  const [bookmarkedThoughtIds, setBookmarkedThoughtIds] = useState<Set<string>>(new Set());
 
-  const suggestedUsers: SuggestedUser[] = [
-    // ... (suggestedUsers data remains the same)
-    {
-      name: "Emma Wilson",
-      username: "emmaw",
-      avatar: "/placeholder.svg?height=40&width=40",
-      bio: "Product designer. Thinking about interfaces and user experiences.",
-    },
-    {
-      name: "David Chen",
-      username: "davidc",
-      avatar: "/placeholder.svg?height=40&width=40",
-      bio: "Software engineer. Building tools for thought.",
-    },
-    {
-      name: "Olivia Taylor",
-      username: "oliviat",
-      avatar: "/placeholder.svg?height=40&width=40",
-      bio: "Writer and researcher. Exploring ideas at the intersection of tech and society.",
-    },
-  ];
+  // Fetch current user and their bookmarks
+  const fetchUserAndBookmarks = useCallback(async (user: SupabaseUser | null) => {
+    if (user) {
+      setCurrentUser(user);
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('bookmarked_thought_ids')
+        .eq('id', user.id)
+        .single();
 
+      if (userError) {
+        console.error("Error fetching user bookmarks:", userError);
+      } else if (userData?.bookmarked_thought_ids) {
+        setBookmarkedThoughtIds(new Set(userData.bookmarked_thought_ids));
+      } else {
+        setBookmarkedThoughtIds(new Set()); // Ensure it's an empty set if no bookmarks
+      }
+    } else {
+      setCurrentUser(null);
+      setBookmarkedThoughtIds(new Set());
+    }
+  }, []); // supabase is stable
+
+  useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      await fetchUserAndBookmarks(session?.user ?? null);
+    });
+
+    // Initial fetch
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      fetchUserAndBookmarks(session?.user ?? null);
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, [fetchUserAndBookmarks]);
+
+  // Fetch thoughts
   useEffect(() => {
     async function fetchExploreThoughts() {
       setIsLoading(true);
       setError(null);
 
-      // The 'data' type from this query is what TypeScript is inferring differently
-      // from our FetchedThoughtFromSupabase.
       const { data, error: dbError } = await supabase
         .from('thoughts')
         .select(`
@@ -89,12 +106,7 @@ export default function DashboardPage() {
         .limit(20);
 
       if (dbError) {
-        // ... (error handling remains the same)
-        if (Object.keys(dbError).length > 0) {
-            console.error("Error fetching thoughts for explore page:", JSON.stringify(dbError, null, 2));
-        } else {
-            console.error("Error fetching thoughts for explore page: Received an empty or non-standard error object.", dbError);
-        }
+        console.error("Error fetching thoughts:", dbError);
         setError("Could not load thoughts. Please try again later.");
         setThoughts([]);
         setIsLoading(false);
@@ -108,66 +120,87 @@ export default function DashboardPage() {
           avatar: "/placeholder.svg?height=40&width=40",
         };
 
-        // Let TypeScript infer 'itemFromDb' from 'data' initially, then process
         const mappedThoughts: DisplayThought[] = data
-          .map((itemFromDb): DisplayThought | null => { // Let TS infer itemFromDb type for a moment
-            // console.log("Processing itemFromDb (raw from Supabase):", JSON.stringify(itemFromDb, null, 2));
-
+          .map((itemFromDb): DisplayThought | null => {
             let userForDisplay = defaultUserDisplay;
             let actualUserObject: UserData | null = null;
 
-            // MODIFICATION: Check if itemFromDb.users is an array or single object
             if (itemFromDb.users) {
               if (Array.isArray(itemFromDb.users)) {
-                // It's an array, take the first element if it exists
-                if (itemFromDb.users.length > 0) {
-                  actualUserObject = itemFromDb.users[0];
-                }
+                if (itemFromDb.users.length > 0) actualUserObject = itemFromDb.users[0];
               } else {
-                // It's a single object (as per your runtime log)
-                actualUserObject = itemFromDb.users as UserData; // Cast here since TS might still think it's an array
+                actualUserObject = itemFromDb.users as UserData;
               }
             }
             
-            // console.log(`For thought ID ${itemFromDb.id}, actualUserObject:`, JSON.stringify(actualUserObject, null, 2));
-
-            if (
-              actualUserObject &&
-              typeof actualUserObject.name === 'string' && actualUserObject.name.trim() !== '' &&
-              typeof actualUserObject.username === 'string' && actualUserObject.username.trim() !== ''
-            ) {
-              // console.log(`For thought ID ${itemFromDb.id}, VALID user found:`, actualUserObject.name); 
+            if (actualUserObject?.name && actualUserObject?.username) {
               userForDisplay = {
                 name: actualUserObject.name,
                 username: actualUserObject.username,
-                avatar: actualUserObject.profile_image_url || "/placeholder.svg?height=40&width=40",
+                avatar: actualUserObject.profile_image_url || defaultUserDisplay.avatar,
               };
-            } else {
-              // console.log(`For thought ID ${itemFromDb.id}, user data is null, invalid or incomplete.`);
             }
 
             return {
-              id: itemFromDb.id as string, // Cast if needed, TS might see 'any' from 'data'
+              id: itemFromDb.id as string,
               user: userForDisplay,
-              content: itemFromDb.content as string, // Cast if needed
-              timestamp: new Date(itemFromDb.created_at as string).toLocaleString(), // Cast if needed
+              content: itemFromDb.content as string,
+              timestamp: new Date(itemFromDb.created_at as string).toLocaleString(),
             };
           })
           .filter((thought): thought is DisplayThought => thought !== null);
-
         setThoughts(mappedThoughts);
       } else {
-        console.warn("No data returned from Supabase for thoughts, and no explicit error.");
         setThoughts([]);
       }
       setIsLoading(false);
     }
 
     fetchExploreThoughts();
-  }, []);
+  }, []); // Run once on mount to fetch thoughts
+
+  const handleBookmarkToggle = useCallback(async (thoughtId: string) => {
+    if (!currentUser) {
+      // Optionally, redirect to login or show a message
+      alert("Please log in to bookmark thoughts.");
+      return;
+    }
+
+    const newBookmarkedIds = new Set(bookmarkedThoughtIds);
+    let isNowBookmarked;
+
+    if (newBookmarkedIds.has(thoughtId)) {
+      newBookmarkedIds.delete(thoughtId);
+      isNowBookmarked = false;
+    } else {
+      newBookmarkedIds.add(thoughtId);
+      isNowBookmarked = true;
+    }
+
+    setBookmarkedThoughtIds(newBookmarkedIds); // Optimistic update
+
+    const { error: updateError } = await supabase
+      .from('users')
+      .update({ bookmarked_thought_ids: Array.from(newBookmarkedIds) })
+      .eq('id', currentUser.id);
+
+    if (updateError) {
+      console.error("Error updating bookmarks:", updateError);
+      // Revert optimistic update on error
+      const revertedBookmarks = new Set(bookmarkedThoughtIds);
+      if (isNowBookmarked) { 
+        revertedBookmarks.delete(thoughtId);
+      } else { 
+        revertedBookmarks.add(thoughtId);
+      }
+      setBookmarkedThoughtIds(revertedBookmarks);
+      alert("Failed to update bookmark. Please try again.");
+    }
+  }, [currentUser, bookmarkedThoughtIds]); // supabase client is stable
+
+  // const suggestedUsers: SuggestedUser[] = [ ... ]; // If needed
 
   return (
-    // ... (JSX remains the same)
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-4 md:p-6">
       <div className="md:col-span-2">
         <h2 className="text-xl font-semibold text-white mb-4">Explore Thoughts</h2>
@@ -178,37 +211,22 @@ export default function DashboardPage() {
         )}
         <div className="space-y-4">
           {thoughts.map((thought) => (
-            <SingleThoughtDisplayCard key={thought.id} thought={thought} />
+            <SingleThoughtDisplayCard
+              key={thought.id}
+              thought={thought}
+              isBookmarked={bookmarkedThoughtIds.has(thought.id)}
+              onBookmarkToggle={handleBookmarkToggle}
+              currentUserId={currentUser?.id}
+            />
           ))}
         </div>
       </div>
 
-      {/* <div className="md:col-span-1">
-        <div className="bg-[#242424] rounded-lg overflow-hidden mb-6">
-          <div className="p-4 border-b border-gray-800">
-            <h2 className="text-white font-medium">Who to follow</h2>
-          </div>
-          <div className="p-4">
-            {suggestedUsers.map((user) => (
-              <div key={user.username} className="flex items-start py-3 border-b border-gray-800 last:border-b-0">
-                <img src={user.avatar || "/placeholder.svg"} alt={user.name} className="w-10 h-10 rounded-full mr-3" />
-                <div className="flex-1">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-white font-medium">{user.name}</h3>
-                      <p className="text-gray-400 text-sm">@{user.username}</p>
-                    </div>
-                    <button className="text-sm bg-white text-black px-3 py-1 rounded-full font-medium hover:bg-gray-200 transition-colors">
-                      Follow
-                    </button>
-                  </div>
-                  <p className="text-gray-300 text-sm mt-1">{user.bio}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div> */}
+      {/* "Who to follow" section - uncomment if needed
+      <div className="md:col-span-1">
+        ...
+      </div> 
+      */}
     </div>
   );
 }
