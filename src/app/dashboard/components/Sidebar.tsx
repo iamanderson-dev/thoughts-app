@@ -2,20 +2,24 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-// Add Bookmark to imports
-import { Home, Search, Users, FileText, PenSquare, Bell, Bookmark } from "lucide-react"
+// Add Bookmark and Menu (for hamburger) to imports
+import { Home, Search, Users, FileText, PenSquare, Bell, Bookmark, Menu, X } from "lucide-react"
 import { useState, useEffect } from "react"
 
 export default function Sidebar() {
   const pathname = usePathname()
   const [isMobile, setIsMobile] = useState(false)
-  const [isVisible, setIsVisible] = useState(true)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false) // Renamed for clarity
 
   useEffect(() => {
     const checkIfMobile = () => {
       const mobile = window.innerWidth < 768
       setIsMobile(mobile)
-      setIsVisible(!mobile) // Show by default on desktop, hide on mobile
+      if (!mobile) {
+        setIsSidebarOpen(true) // Keep sidebar open on desktop
+      } else {
+        setIsSidebarOpen(false) // Ensure sidebar is closed by default on mobile
+      }
     }
 
     checkIfMobile()
@@ -24,35 +28,64 @@ export default function Sidebar() {
   }, [])
 
   const isActive = (path: string) => {
-    return pathname === path || (path === "/dashboard" && pathname.startsWith("/dashboard") && pathname !== "/dashboard/search" && pathname !== "/dashboard/following" && pathname !== "/dashboard/notifications" && pathname !== "/dashboard/bookmarks");
+    // Ensure the new /dashboard/bookmark is also excluded for the main dashboard link
+    if (path === "/dashboard") {
+      return pathname === path ||
+             (pathname.startsWith("/dashboard") &&
+              pathname !== "/dashboard/search" &&
+              pathname !== "/dashboard/following" &&
+              pathname !== "/dashboard/notifications" &&
+              pathname !== "/dashboard/bookmarks" && // Original
+              pathname !== "/dashboard/bookmark");   // Added new one
+    }
+    return pathname === path;
   }
 
-
-  const handleMouseEnter = () => {
+  const toggleSidebar = () => {
     if (isMobile) {
-      setIsVisible(true)
+      setIsSidebarOpen(!isSidebarOpen)
     }
   }
 
-  const handleMouseLeave = () => {
-    if (isMobile) {
-      setIsVisible(false)
+  const handleLinkClick = () => {
+    if (isMobile && isSidebarOpen) {
+      setIsSidebarOpen(false);
     }
-  }
+    // If you want to dispatch the event for "Post a thought"
+    // and also close the sidebar, you can do it here, or modify the onClick for that specific link
+  };
+
 
   return (
     <>
-      {isMobile && !isVisible && (
-        <div className="fixed inset-y-0 left-0 w-4 bg-transparent z-40" onMouseEnter={handleMouseEnter}></div>
+      {/* Hamburger Menu Button - Only on Mobile */}
+      {isMobile && (
+        <button
+          onClick={toggleSidebar}
+          className="fixed top-4 left-4 z-[60] p-2 bg-[#2a2a2a] text-white rounded-md hover:bg-[#3a3a3a] transition-colors"
+          aria-label="Toggle navigation menu"
+          aria-expanded={isSidebarOpen}
+          aria-controls="sidebar-nav"
+        >
+          {isSidebarOpen ? <X size={24} /> : <Menu size={24} />}
+        </button>
+      )}
+
+      {/* Overlay - Only on Mobile when Sidebar is Open */}
+      {isMobile && isSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-40"
+          onClick={toggleSidebar}
+        ></div>
       )}
 
       <div
+        id="sidebar-nav" // For ARIA
         className={`fixed inset-y-0 left-0 w-16 bg-[#1a1a1a] border-r border-gray-800 flex flex-col items-center py-6 transition-transform duration-300 z-50 ${
-          isMobile && !isVisible ? "-translate-x-full" : "translate-x-0"
-        }`}
-        onMouseLeave={handleMouseLeave}
+          isMobile && !isSidebarOpen ? "-translate-x-full" : "translate-x-0"
+        } ${isMobile ? "pt-16" : ""}`} // Add padding-top on mobile to avoid overlap with hamburger
       >
-        <Link href="/dashboard" className="text-white hover:text-gray-300 mb-4"> {/* Added mb-4 for spacing */}
+        <Link href="/dashboard" className="text-white hover:text-gray-300 mb-4" onClick={handleLinkClick}>
           <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center">
             <span className="text-black font-bold text-xs">T</span>
           </div>
@@ -65,6 +98,7 @@ export default function Sidebar() {
             href="/dashboard"
             className={`${isActive("/dashboard") ? "text-white" : "text-gray-400"} hover:text-white`}
             title="Explore"
+            onClick={handleLinkClick}
           >
             <Home size={20} />
           </Link>
@@ -72,6 +106,7 @@ export default function Sidebar() {
             href="/dashboard/search"
             className={`${isActive("/dashboard/search") ? "text-white" : "text-gray-400"} hover:text-white`}
             title="Search"
+            onClick={handleLinkClick}
           >
             <Search size={20} />
           </Link>
@@ -79,14 +114,15 @@ export default function Sidebar() {
             href="/dashboard/following"
             className={`${isActive("/dashboard/following") ? "text-white" : "text-gray-400"} hover:text-white`}
             title="Following"
+            onClick={handleLinkClick}
           >
             <Users size={20} />
           </Link>
-          {/* New Bookmark Link */}
           <Link
-            href="/dashboard/bookmark"
+            href="/dashboard/bookmark" // Corrected href based on your isActive logic for /dashboard
             className={`${isActive("/dashboard/bookmark") ? "text-white" : "text-gray-400"} hover:text-white`}
             title="Bookmarks"
+            onClick={handleLinkClick}
           >
             <Bookmark size={20} />
           </Link>
@@ -94,6 +130,7 @@ export default function Sidebar() {
             href="/dashboard/notifications"
             className={`${isActive("/dashboard/notifications") ? "text-white" : "text-gray-400"} hover:text-white relative`}
             title="Notifications"
+            onClick={handleLinkClick}
           >
             <Bell size={20} />
             <span className="absolute -top-1 -right-1 bg-red-500 rounded-full w-2 h-2"></span>
@@ -105,6 +142,7 @@ export default function Sidebar() {
             onClick={(e) => {
               e.preventDefault()
               document.dispatchEvent(new CustomEvent("open-thought-modal"))
+              handleLinkClick(); // Also close sidebar
             }}
           >
             <PenSquare size={20} />
@@ -115,11 +153,12 @@ export default function Sidebar() {
 
         <div className="mb-6">
           <Link
-            href="/profile" // Assuming /profile is the correct path
+            href="/profile"
             className={`${isActive("/profile") ? "text-white" : "text-gray-400"} hover:text-white`}
             title="Profile"
+            onClick={handleLinkClick}
           >
-            <FileText size={20} /> {/* Consider UserCircle or similar for profile */}
+            <FileText size={20} />
           </Link>
         </div>
       </div>
